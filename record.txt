@@ -1,0 +1,204 @@
+================================================================
+CMPE321 Project 3 — Experiment Record
+Commands and results for all three analysis experiments.
+Workload seed is fixed (--seed 42) so results are reproducible.
+================================================================
+
+Run all commands from the project root directory.
+Clean between runs: rm -f catalog.json *.db output.txt log.csv stats_output.txt
+
+
+----------------------------------------------------------------
+STEP 0 — Generate workload files (run once)
+----------------------------------------------------------------
+
+python3 workload_generator.py --mode sequential --records 200 --queries 100 --seed 42 > wl_sequential.txt
+echo "stats" >> wl_sequential.txt
+
+python3 workload_generator.py --mode random --records 200 --queries 100 --seed 42 > wl_random.txt
+echo "stats" >> wl_random.txt
+
+python3 workload_generator.py --mode range --records 200 --queries 100 --seed 42 > wl_range.txt
+echo "stats" >> wl_range.txt
+
+python3 workload_generator.py --mode mixed --records 200 --queries 100 --seed 42 > wl_mixed.txt
+echo "stats" >> wl_mixed.txt
+
+
+----------------------------------------------------------------
+EXPERIMENT 1 — LRU vs MRU
+Config: bplus_tree, buffer_pool_size=16
+Workloads: sequential, random
+----------------------------------------------------------------
+
+Config files used:
+  cfg_exp1_lru.json  — {"page_size":4096,"max_records_per_page":10,"buffer_pool_size":16,"replacement_policy":"LRU","index_strategy":"bplus_tree"}
+  cfg_exp1_mru.json  — {"page_size":4096,"max_records_per_page":10,"buffer_pool_size":16,"replacement_policy":"MRU","index_strategy":"bplus_tree"}
+
+--- Sequential workload, LRU ---
+rm -f catalog.json *.db output.txt log.csv stats_output.txt
+python3 archive.py cfg_exp1_lru.json wl_sequential.txt
+cat stats_output.txt
+
+RESULT:
+  Disk I/O: 3259 reads, 171 writes
+  Buffer Pool: 5101 requests, 1842 hits, 3259 misses (36.1% hit rate)
+  Evictions: 3247 (147 dirty writebacks)
+
+--- Sequential workload, MRU ---
+rm -f catalog.json *.db output.txt log.csv stats_output.txt
+python3 archive.py cfg_exp1_mru.json wl_sequential.txt
+cat stats_output.txt
+
+RESULT:
+  Disk I/O: 948 reads, 80 writes
+  Buffer Pool: 5101 requests, 4153 hits, 948 misses (81.4% hit rate)
+  Evictions: 936 (56 dirty writebacks)
+
+--- Random workload, LRU ---
+rm -f catalog.json *.db output.txt log.csv stats_output.txt
+python3 archive.py cfg_exp1_lru.json wl_random.txt
+cat stats_output.txt
+
+RESULT:
+  Disk I/O: 1304 reads, 170 writes
+  Buffer Pool: 3501 requests, 2197 hits, 1304 misses (62.8% hit rate)
+  Evictions: 1292 (146 dirty writebacks)
+
+--- Random workload, MRU ---
+rm -f catalog.json *.db output.txt log.csv stats_output.txt
+python3 archive.py cfg_exp1_mru.json wl_random.txt
+cat stats_output.txt
+
+RESULT:
+  Disk I/O: 423 reads, 81 writes
+  Buffer Pool: 3501 requests, 3078 hits, 423 misses (87.9% hit rate)
+  Evictions: 411 (57 dirty writebacks)
+
+Summary Table (Experiment 1):
+  Workload    | Policy | I/Os (R+W)      | Hit Rate
+  ------------|--------|-----------------|----------
+  Sequential  | LRU    | 3259 + 171      | 36.1%
+  Sequential  | MRU    |  948 +  80      | 81.4%
+  Random      | LRU    | 1304 + 170      | 62.8%
+  Random      | MRU    |  423 +  81      | 87.9%
+
+Observation: MRU outperforms LRU on sequential scans because it
+immediately recycles the most recently used page instead of keeping
+it, avoiding sequential flooding. LRU keeps pages that will not be
+reused again soon, causing the entire pool to be polluted.
+
+
+----------------------------------------------------------------
+EXPERIMENT 2 — Index Strategy Comparison
+Config: LRU, buffer_pool_size=16
+Workloads: random (equality queries), range
+----------------------------------------------------------------
+
+Config files used:
+  cfg_exp2_heap.json  — {"page_size":4096,"max_records_per_page":10,"buffer_pool_size":16,"replacement_policy":"LRU","index_strategy":"heap_scan"}
+  cfg_exp2_hash.json  — {"page_size":4096,"max_records_per_page":10,"buffer_pool_size":16,"replacement_policy":"LRU","index_strategy":"hash_index"}
+  cfg_exp2_btree.json — {"page_size":4096,"max_records_per_page":10,"buffer_pool_size":16,"replacement_policy":"LRU","index_strategy":"bplus_tree"}
+
+--- Equality queries (random workload) ---
+
+rm -f catalog.json *.db output.txt log.csv stats_output.txt
+python3 archive.py cfg_exp2_heap.json wl_random.txt
+cat stats_output.txt
+  RESULT: Disk I/O: 1805 reads, 76 writes   | Hit Rate: 65.4%
+
+rm -f catalog.json *.db output.txt log.csv stats_output.txt
+python3 archive.py cfg_exp2_hash.json wl_random.txt
+cat stats_output.txt
+  RESULT: Disk I/O: 1423 reads, 401 writes  | Hit Rate: 47.2%
+
+rm -f catalog.json *.db output.txt log.csv stats_output.txt
+python3 archive.py cfg_exp2_btree.json wl_random.txt
+cat stats_output.txt
+  RESULT: Disk I/O: 1304 reads, 170 writes  | Hit Rate: 62.8%
+
+--- Range queries ---
+
+rm -f catalog.json *.db output.txt log.csv stats_output.txt
+python3 archive.py cfg_exp2_heap.json wl_range.txt
+cat stats_output.txt
+  RESULT: Disk I/O: 3460 reads, 76 writes   | Hit Rate: 44.0%
+
+rm -f catalog.json *.db output.txt log.csv stats_output.txt
+python3 archive.py cfg_exp2_hash.json wl_range.txt
+cat stats_output.txt
+  RESULT: Disk I/O: 3278 reads, 401 writes  | Hit Rate: 27.1%
+
+rm -f catalog.json *.db output.txt log.csv stats_output.txt
+python3 archive.py cfg_exp2_btree.json wl_range.txt
+cat stats_output.txt
+  RESULT: Disk I/O: 3259 reads, 171 writes  | Hit Rate: 36.1%
+
+Summary Table (Experiment 2):
+  Query Type | Strategy   | Reads | Writes | Hit Rate
+  -----------|------------|-------|--------|----------
+  Equality   | heap_scan  | 1805  |  76    | 65.4%
+  Equality   | hash_index | 1423  | 401    | 47.2%
+  Equality   | bplus_tree | 1304  | 170    | 62.8%
+  Range      | heap_scan  | 3460  |  76    | 44.0%
+  Range      | hash_index | 3278  | 401    | 27.1%  (falls back to heap scan)
+  Range      | bplus_tree | 3259  | 171    | 36.1%
+
+Observation: B+ tree has the fewest reads for equality queries because
+it traverses only O(log N) pages to reach the target leaf. Hash index
+has high write counts because of bucket page maintenance. For range
+queries, hash index falls back to a full heap scan so it performs
+similarly to heap_scan but with extra index overhead. B+ tree range
+search traverses leaves in order and is the most efficient strategy
+for range queries on the primary key.
+
+
+----------------------------------------------------------------
+EXPERIMENT 3 — Buffer Pool Size Sensitivity
+Config: bplus_tree, LRU
+Workload: mixed (inserts + searches + deletes)
+Buffer sizes: 4, 8, 16, 32, 64
+----------------------------------------------------------------
+
+Config files used:
+  cfg_exp3_4.json  — {"page_size":4096,"max_records_per_page":10,"buffer_pool_size":4, "replacement_policy":"LRU","index_strategy":"bplus_tree"}
+  cfg_exp3_8.json  — {"page_size":4096,"max_records_per_page":10,"buffer_pool_size":8, "replacement_policy":"LRU","index_strategy":"bplus_tree"}
+  cfg_exp3_16.json — {"page_size":4096,"max_records_per_page":10,"buffer_pool_size":16,"replacement_policy":"LRU","index_strategy":"bplus_tree"}
+  cfg_exp3_32.json — {"page_size":4096,"max_records_per_page":10,"buffer_pool_size":32,"replacement_policy":"LRU","index_strategy":"bplus_tree"}
+  cfg_exp3_64.json — {"page_size":4096,"max_records_per_page":10,"buffer_pool_size":64,"replacement_policy":"LRU","index_strategy":"bplus_tree"}
+
+rm -f catalog.json *.db output.txt log.csv stats_output.txt
+python3 archive.py cfg_exp3_4.json wl_mixed.txt && cat stats_output.txt
+  RESULT: Disk I/O: 3167 reads, 479 writes  | Hit Rate: 25.2%
+
+rm -f catalog.json *.db output.txt log.csv stats_output.txt
+python3 archive.py cfg_exp3_8.json wl_mixed.txt && cat stats_output.txt
+  RESULT: Disk I/O: 2840 reads, 390 writes  | Hit Rate: 32.9%
+
+rm -f catalog.json *.db output.txt log.csv stats_output.txt
+python3 archive.py cfg_exp3_16.json wl_mixed.txt && cat stats_output.txt
+  RESULT: Disk I/O: 1732 reads, 244 writes  | Hit Rate: 59.1%
+
+rm -f catalog.json *.db output.txt log.csv stats_output.txt
+python3 archive.py cfg_exp3_32.json wl_mixed.txt && cat stats_output.txt
+  RESULT: Disk I/O:   21 reads,  26 writes  | Hit Rate: 99.5%
+
+rm -f catalog.json *.db output.txt log.csv stats_output.txt
+python3 archive.py cfg_exp3_64.json wl_mixed.txt && cat stats_output.txt
+  RESULT: Disk I/O:   21 reads,  26 writes  | Hit Rate: 99.5%
+
+Summary Table (Experiment 3):
+  Buffer Size | Reads | Writes | Hit Rate
+  ------------|-------|--------|----------
+       4      | 3167  |  479   | 25.2%
+       8      | 2840  |  390   | 32.9%
+      16      | 1732  |  244   | 59.1%
+      32      |   21  |   26   | 99.5%
+      64      |   21  |   26   | 99.5%
+
+Observation: Performance improves dramatically as pool size grows.
+At pool=32, all active pages fit in the buffer and I/O drops to near
+zero — only the initial cold-start loads hit the disk. Increasing
+beyond 32 gives no further benefit because the working set is fully
+covered. The sharp drop between pool=16 and pool=32 shows the point
+at which the working set fits entirely in memory.
